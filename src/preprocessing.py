@@ -126,10 +126,6 @@ class Preprocess(object):
         self.df_train_order_details.loc[self.df_train_order_details.user_id.isin(self.users_train)].to_pickle('Y_train.pickle')
         self.df_train_order_details.loc[self.df_train_order_details.user_id.isin(self.users_val)].to_pickle('Y_val.pickle')
 
-        a.df_prior_order_details.loc[a.df_prior_order_details.user_id.isin(a.users_train)]
-
-
-
     def fit(self):
         '''
         Fit preprocessing methods
@@ -138,7 +134,7 @@ class Preprocess(object):
         self._users()
         self._products()
         self._merger()
-        # self._partition()
+        self._partition()
 
 if __name__ == '__main__':
     a = Preprocess()
