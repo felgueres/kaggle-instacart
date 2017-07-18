@@ -9,20 +9,28 @@ class ReorderModel(object):
     """
 
     def __init__(self, X_train = '../data/X_train.pickle', y_train = '../data/y_train.pickle', model = 'greedier'):
-        self.df_X_train = pd.read_pickle(X_train)
-        self.df_y_train = pd.read_pickle(y_train)
-        self.y_train_labels = self.df_y_train.groupby(['user_id', 'order_id'])['product_id'].apply(get_products).reset_index()
-        self.y_train_labels.rename(columns = {'product_id': 'y'}, inplace = True)
         self.curr_model = None
         self.df_pred = None
         self.model = model
+        #Load train_test data.
+        self.df_X_train = pd.read_pickle(X_train)
+        self.df_y_train = pd.read_pickle(y_train)
+        '''
+        Handle the response dataset
+        '''
+        #Filter for only reordered items
+        self.y_train_labels = self.df_y_train.groupby(['user_id', 'order_id'])['product_id','reordered'].apply(get_products).reset_index()
+
+        self.y_train_labels.rename(columns = {'product_id': 'y'}, inplace = True)
+        #If no reordered items, fill with None as in comp description
+        self.y_train_labels.y.fillna('None', inplace = True )
 
     def greedy(self):
         '''
         This model is the utter baseline - says users will rebuy whatever they bought previously.
         '''
         self.curr_model = 'Greedy-Baseline'
-        self.df_pred = self.df_X_train.groupby(self.df_X_train.user_id)['product_id'].apply(get_products).reset_index()
+        self.df_pred = self.df_X_train.groupby('user_id')['product_id'].apply(get_products).reset_index()
         self.df_pred.rename(columns = {'product_id': 'y_pred'}, inplace = True)
 
     def greedier(self):
@@ -39,14 +47,16 @@ class ReorderModel(object):
         '''
         #Merge actual vs predictions
         self.df_y_vs_y_pred = self.y_train_labels.merge(self.df_pred, on = "user_id", how = 'left')
+        #Drop nulls
+        self.df_y_vs_y_pred.dropna(axis = 0, inplace = True)
         #Get actual vs pred columns in tuples in iterator.
         self.df_y_vs_y_pred = self.df_y_vs_y_pred.loc[:, ['y', 'y_pred']].copy()
         #Compute results: Results columns at this point are: index, y, y_pred
         self.results = [score(order[1], order[2]) for order in self.df_y_vs_y_pred.itertuples()]
         #Insert results to dataframe
         self.results = pd.DataFrame(np.array(self.results), columns = ['precision', 'recall', 'f1'])
-        # PRINT THE SCORE
-        # print "Average F1 Score: {0: .1f}%".format(self.results.f1.mean())
+        # PRINT SCORE
+        print "Average F1 Score: {0:.0%}".format(self.results.f1.mean())
 
     def fit_predict(self):
         '''
@@ -79,4 +89,4 @@ def get_products(user_products):
 
 if __name__ == '__main__':
     b = ReorderModel()
-    b.fit_predict()
+    # b.fit_predict()
