@@ -3,33 +3,62 @@ import numpy as np
 from os import path, listdir
 
 class Preprocess(object):
-
     '''
-    Handles preprocessing of data for Instacart Competition.
+    Handles preprocessing of data and returns pickle files for train, validation and testing datasets.
 
     Parameters
     ----------
     path: str
         Path to folder with data files.
+
+    Output
+    ------
+    train: pickle
+        File containing dataset to train models.
+    validation: pickle
+        File containing dataset to cross-validate models.
+    test: pickle
+        File containing dataset for testing (30% of comp's data, remaining 70% is the official test)
     '''
 
     def __init__(self, datapath = '../data/'):
         '''
         Initialize with string to data folder.
         '''
-        self.files = [path.join(datapath, file) for file in listdir(datapath) if file.endswith('csv')]
+        self._files = [path.join(datapath, file) for file in sorted(listdir(datapath)) if file.endswith('csv')]
 
     def _load2df(self):
         '''
         Load data into dataframes
         '''
-        # Load data to dataframe
-        self._df_aisles = pd.read_csv(self.files[0])
-        self._df_dpts = pd.read_csv(self.files[1])
-        self.df_order_prior = pd.read_csv(self.files[2])
-        self.df_order_train = pd.read_csv(self.files[3])
-        self.df_orders = pd.read_csv(self.files[4])
-        self.df_products = pd.read_csv(self.files[5])
+        #Specify dtypes for memory optimization
+        dtypes_order_products ={
+            'order_id': np.int32,
+            'product_id': np.uint16,
+            'add_to_cart_order': np.int16,
+            'reordered': np.int8}
+
+        dtypes_orders = {
+        'order_id': np.int32,
+        'user_id': np.int32,
+        'order_number': np.int16,
+        'order_dow': np.int8,
+        'order_hour_of_day': np.int8,
+        'days_since_prior_order': np.float16}
+
+        dtypes_products = {
+        'product_id': np.uint16,
+        'order_id': np.int32,
+        'aisle_id': np.uint8,
+        'department_id': np.uint8}
+
+        # Load data to dataframes
+        self._df_aisles = pd.read_csv(self._files[0])
+        self._df_dpts = pd.read_csv(self._files[1])
+        self.df_order_prior = pd.read_csv(self._files[2], dtype = dtypes_order_products)
+        self.df_order_train = pd.read_csv(self._files[3], dtype = dtypes_order_products)
+        self.df_orders = pd.read_csv(self._files[4], dtype = dtypes_orders)
+        self.df_products = pd.read_csv(self._files[5], dtype = dtypes_products)
 
     def _products(self):
         '''
@@ -47,39 +76,65 @@ class Preprocess(object):
         #The users test dataset is the hold out only for final submissions
         self.users_test = self.df_orders.loc[(self.df_orders.eval_set == "test")].user_id
         #Divide the train dataset into a training and validation dataset
-        #training dataset
         self.users_train = users_train_all.sample(frac = 0.8, random_state = 10)
         #validation dataset / users that are not present in the users train set
         self.users_val = users_train_all[~users_train_all.isin(self.users_train)]
 
+    def _merger(self):
+        '''
+        Merge orders with details of priors.
+        '''
+        # Use all prior orders and merge to df_orders on order id.
+        df_prior_order_details = pd.merge(left=self.df_order_prior,
+                                 right=self.df_orders,
+                                 how='left',
+                                 on='order_id')
+
+        # Add detail dataframe of products
+        df_prior_order_details = pd.merge(left=df_prior_order_details,
+                                 right=self.df_products,
+                                 how='left',
+                                 on='product_id')
+
+        self.df_prior_order_details = df_prior_order_details
+
+        # Merge details to df_order_train as well.
+
+        df_train_order_details = pd.merge(left=self.df_order_train,
+                                 right=self.df_orders,
+                                 how='left',
+                                 on='order_id')
+
+        # Add detail dataframe of products
+        df_train_order_details = pd.merge(left=df_train_order_details,
+                                 right=self.df_products,
+                                 how='left',
+                                 on='product_id')
+
+        self.df_train_order_details = df_train_order_details
+
     def _partition(self):
         '''
-        Separate the training datapoints into validation and test set.
+        Separate orders details into training, validation and test dataset.
+        Pickle results for easy retrieval.
         '''
-        pass
+        #These are the priors for the three sets (Put in another way, these is your featurespace X in f(X))
+        self.df_prior_order_details.loc[self.df_prior_order_details.user_id.isin(self.users_train)].to_pickle('X_train.pickle')
+        self.df_prior_order_details.loc[self.df_prior_order_details.user_id.isin(self.users_val)].to_pickle('X_val.pickle')
+        self.df_prior_order_details.loc[self.df_prior_order_details.user_id.isin(self.users_test)].to_pickle('X_test.pickle')
+        #Now response variables for the train and validation dataset only (test is not included in data for comp purposes)
+        self.df_train_order_details.loc[self.df_train_order_details.user_id.isin(self.users_train)].to_pickle('Y_train.pickle')
+        self.df_train_order_details.loc[self.df_train_order_details.user_id.isin(self.users_val)].to_pickle('Y_val.pickle')
 
     def fit(self):
         '''
-        Runs all preprocessing methods. Output to be used by the model class.
+        Fit preprocessing methods
         '''
         self._load2df()
         self._users()
         self._products()
+        self._merger()
         self._partition()
-
-
-class FeaturedData(object):
-    """Feature Engineering Dataset"""
-
-    def __init__(self, Preprocess):
-        self.data = Preprocess
-
-
-    def _somemethodstofeaturize(self):
-        '''
-        FeatureSpace to learn from.
-        '''
-        pass
 
 if __name__ == '__main__':
     a = Preprocess()
