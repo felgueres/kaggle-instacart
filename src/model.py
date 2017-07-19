@@ -1,61 +1,73 @@
 import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score
+from sklearn.ensemble import RandomForestClassifier as RF
 from score import score
+from featurization import FeaturedData
+from utilities_funcs import get_products
 
 class ReorderModel(object):
     """
-    Predict which previously purchased products will be in a user’s next order.
+    Predict which previously purchased products will be in a user next order.
     """
 
-    def __init__(self, X_train, istraining = False, model = 'greedier'):
+    def __init__(self, FeaturedData, model = None):
         self.curr_model = None
         self.df_pred = None
         self.model = model
         #Load train_test data.
-        if istraining:
-            self.df_X_train = pd.read_pickle('../data/X_train.pickle')
+        self.FeaturedData = FeaturedData
 
-        self.df_X_train = X_train
+    def _load_data(self):
+        '''
+        Load X_train and y_train data
+        '''
+        self.df_X_train = self.FeaturedData.df_X_train
+        #Handle response data.
+        self.df_y_train = self.FeaturedData.df_y_train
 
-        self.df_y_train = pd.read_pickle('../data/y_train.pickle')
+    def _splitter(self):
         '''
-        Handle the response dataset
+        Split and vectorize data for model
         '''
-        #Filter for only reordered items
-        self.y_train_labels = self.df_y_train
-        self.y_train_labels.loc[self.df_y_train.reordered == 0, 'product_id'] = 'None'
-        self.y_train_labels = self.df_y_train.groupby(['user_id', 'order_id'])['product_id'].apply(get_products).reset_index()
-        self.y_train_labels.rename(columns = {'product_id': 'y'}, inplace = True)
+        self.df_y_train.rename(columns = {'reordered' : 'target', 'order_id': 'target_order'}, inplace = True)
+        #Index only needed cols.
+        self.df_y_train = self.df_y_train.loc[:,['product_id', 'target', 'user_id']].copy()
+        #Merge X_train to y_train
+        #if product is new as has not been ordered before, then it is not relevant for merge.
+        #all products that have a previous order but are not in new one should be zero.
+        self.df = self.df_X_train.merge(self.df_y_train, on = ["user_id",'product_id'], how = 'left')
+        self.df.loc[self.df.target.isnull(), 'target'] = 0
+        self.df.days_since_prior_order.fillna(0, inplace = True)
 
-    def greedy(self):
-        '''
-        This model is the utter baseline - says users will rebuy whatever they bought previously.
-        '''
-        self.curr_model = 'Greedy'
-        self.df_pred = self.df_X_train.groupby('user_id')['product_id'].apply(get_products).reset_index()
-        self.df_pred.rename(columns = {'product_id': 'y_pred'}, inplace = True)
+        #Had to use this hacky way of getting the target col because it was outputing inf values non=sense on array values.
+        cols = self.df.columns.tolist()
+        cols.append(cols.pop(cols.index('target')))
+        #Vectorize X and y
+        self.df = self.df.loc[:,cols].copy()
 
-    def greedier(self):
-        '''
-        This model is a bit more intelligent, it will only take into account items that have been reordered in the past.
-        '''
-        self.curr_model = 'Greedier'
-        self.df_pred = self.df_X_train
-        self.df_pred.loc[self.df_pred.reordered == 0, 'product_id'] = 'None'
-        self.df_pred = self.df_pred.groupby('user_id')['product_id'].apply(get_products).reset_index()
-        self.df_pred.rename(columns = {'product_id': 'y_pred'}, inplace = True)
+        self.X = self.df.values[:,:-1]
+        self.y = self.df.values[:,-1]
 
-    def baseline(self):
+        return self.X, self.y
+
+    def _model(self):
         '''
-        Take into account items that have been reordered in the last order.
+        First iteration will be a random forrest.
         '''
-        self.curr_model = 'Baseline'
-        self.df_pred = self.df_X_train
-        self.df_pred.loc[self.df_pred.reordered == 0, 'product_id'] = 'None'
-        mask = self.df_pred.groupby('user_id')['order_number'].transform(max)
-        self.df_pred = self.df_pred[self.df_pred.order_number == mask].groupby('user_id')['product_id'].apply(get_products).reset_index()
-        self.df_pred.rename(columns = {'product_id': 'y_pred'}, inplace = True)
+        # Init model
+        self.model = RF(n_estimators = 10)
+        X, y = self._splitter()
+        self.model.fit(X, y)
+
+    def fit(self):
+        '''
+        Run chosen model
+        '''
+        print 'Model %s' %self.curr_model
+
+        self._load_data()
+        self._model()
 
     def scoremodel(self):
         '''
@@ -63,8 +75,6 @@ class ReorderModel(object):
         '''
         #Merge actual vs predictions
         self.df_y_vs_y_pred = self.y_train_labels.merge(self.df_pred, on = "user_id", how = 'left')
-        #Drop nulls
-        self.df_y_vs_y_pred.dropna(axis = 0, inplace = True)
         #Get actual vs pred columns in tuples in iterator.
         self.df_y_vs_y_pred = self.df_y_vs_y_pred.loc[:, ['y', 'y_pred']].copy()
         #Compute results: Results columns at this point are: index, y, y_pred
@@ -74,41 +84,10 @@ class ReorderModel(object):
         # PRINT SCORE
         print "Average F1 Score: {0:.3%}".format(self.results.f1.mean())
 
-    def fit_predict(self):
-        '''
-        Run chosen model
-        '''
-        #Run specified model
-        if self.model == 'greedy':
-            self.greedy() #Yield f1Score 21.528%
-
-        elif self.model == 'greedier':
-            self.greedier() #Yields f1Score: 30.267%
-
-        elif self.model == 'baseline':
-            self.baseline() #Yields f1 Score: 32.575%
-
-        print 'Model %s' %self.curr_model
-        self.scoremodel()
-
-def get_products(user_products):
-    '''
-    Get list of product ids from a groupby object into competitions format
-    #Sample:
-    #order_id,products
-    #17,1 2
-    #34,None
-    #137,1 2 3
-    '''
-    #Get list of product ids from a grouped object
-    products = [str(product) for product in set(user_products) if not product == 'None']
-    #Check if list is empty, which would mean there are no reordered items; if so, replace by a single None.
-    if not products:
-        products.append('None')
-    #concatenate products
-    concat_str = ' '.join(products)
-    return concat_str
 
 if __name__ == '__main__':
-    b = ReorderModel()
-    b.fit_predict()
+    data = FeaturedData()
+    data.transform()
+
+    model = ReorderModel(FeaturedData = data)
+    model.fit()

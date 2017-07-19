@@ -1,10 +1,8 @@
 import pandas as pd
 import numpy as np
-from model import ReorderModel
 
-class Featurization(object):
+class FeaturedData(object):
     """Feature Engineering Dataset"""
-
     def __init__(self, X_train = '../data/X_train.pickle', y_train = '../data/y_train.pickle'):
         #Load train_test data.
         self.df_X_train = pd.read_pickle(X_train)
@@ -26,7 +24,7 @@ class Featurization(object):
         'aisle_id',
         'department_id']
 
-        self.df_X_train = self.df_X_train.loc[cols].copy()
+        self.df_X_train = self.df_X_train.loc[:,cols].copy()
 
     def transform(self):
         '''
@@ -36,5 +34,7 @@ class Featurization(object):
         self.col2use()
 
 if __name__ == '__main__':
+    #Init with X_train_pickle
     c = FeaturedData()
+    #Run featurization
     c.transform()
